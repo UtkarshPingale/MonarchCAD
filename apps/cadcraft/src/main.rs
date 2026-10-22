@@ -23,6 +23,7 @@ mod logging;
 mod native_menu;
 mod spacemouse;
 mod system_animations;
+mod watchdog;
 mod workspace;
 
 use cadcraft_engine::Session;
@@ -37,6 +38,7 @@ struct App {
     system_animations: system_animations::SystemAnimations,
     workspace: workspace::Workspace,
     workspace_error: Option<String>,
+    watchdog: watchdog::Watchdog,
     #[cfg(target_os = "macos")]
     native_menu: Option<native_menu::NativeMenu>,
 }
@@ -79,6 +81,9 @@ impl eframe::App for App {
         self.cad.logic(ctx);
         self.spacemouse.poll(&mut self.cad, ctx);
         self.persist_workspace(false);
+        if self.watchdog.should_quit() {
+            self.cad.quit_requested = true;
+        }
         if std::mem::take(&mut self.cad.quit_requested) {
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
         }
@@ -198,7 +203,7 @@ fn app_icon() -> Option<egui::IconData> {
 
 fn version_string() -> String {
     let sha = option_env!("CADCRAFT_BUILD_SHA").unwrap_or("dev");
-    format!("cadcraft {} ({sha})", env!("CARGO_PKG_VERSION"))
+    format!("MonarchCAD {} ({sha})", env!("CARGO_PKG_VERSION"))
 }
 
 /// The control port from `--control <port>` or `CADCRAFT_CONTROL_PORT` (`source`); a value that is
@@ -231,12 +236,26 @@ fn main() -> eframe::Result {
     // lossy, so a value that is not Unicode is reported like any other bad port instead of ignored
     let mut control_port =
         control_port_from("CADCRAFT_CONTROL_PORT", std::env::var_os("CADCRAFT_CONTROL_PORT").map(|p| p.to_string_lossy().into_owned()));
+    let mut backend_port: Option<u16> = if std::env::var_os("MONARCH_DISABLE_WATCHDOG").is_some() {
+        None
+    } else {
+        std::env::var("MONARCH_BACKEND_PORT")
+            .ok()
+            .and_then(|p| p.trim().parse::<u16>().ok())
+            .or(Some(8000))
+    };
     let mut files = Vec::new();
     let mut sample = false;
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
         match a.as_str() {
             "--control" => control_port = control_flag(control_port, args.next()),
+            "--backend-port" => {
+                if let Some(p) = args.next().and_then(|s| s.parse::<u16>().ok()) {
+                    backend_port = Some(p);
+                }
+            }
+            "--no-watchdog" => backend_port = None,
             "--sample" => sample = true,
             "--version" | "-V" => {
                 println!("{}", version_string());
@@ -264,7 +283,7 @@ fn main() -> eframe::Result {
         // swapchains hold two frames back under vsync (`CADCRAFT_VSYNC=1` restores vsync).
         wgpu_options: eframe::egui_wgpu::WgpuConfiguration::default().with_surface_config(surface),
         viewport: egui::ViewportBuilder::default()
-            .with_title("CADCraft")
+            .with_title("MonarchCAD")
             .with_inner_size([1600.0, 1000.0])
             .with_min_inner_size([900.0, 560.0])
             .with_drag_and_drop(true)
@@ -305,7 +324,7 @@ fn main() -> eframe::Result {
         }));
     }
     eframe::run_native(
-        "CADCraft",
+        "MonarchCAD",
         options,
         Box::new(move |cc| {
             let mut app = CadApp::new(Session::empty(), services());
@@ -314,7 +333,7 @@ fn main() -> eframe::Result {
                 app.ui = ui;
             }
             if let Some(error) = &workspace_error {
-                eprintln!("CADCraft workspace: {error}");
+                eprintln!("MonarchCAD workspace: {error}");
                 app.set_status(error);
             }
             app.system_languages = std::env::var("CADCRAFT_LOCALE").map(|s| vec![s]).unwrap_or_else(|_| sys_locale::get_locales().collect());
@@ -363,6 +382,10 @@ fn main() -> eframe::Result {
             let desktop_theme = desktop_theme::DesktopTheme::start(move || ctx.request_repaint());
             let ctx = cc.egui_ctx.clone();
             let system_animations = system_animations::SystemAnimations::start(move || ctx.request_repaint());
+            let watchdog = match backend_port {
+                Some(port) => watchdog::Watchdog::new(port, cc.egui_ctx.clone()),
+                None => watchdog::Watchdog::disabled(),
+            };
             Ok(Box::new(App {
                 desktop_theme,
                 system_animations,
@@ -370,6 +393,7 @@ fn main() -> eframe::Result {
                 spacemouse: spacemouse::SpaceMouse::start(cc.egui_ctx.clone()),
                 workspace,
                 workspace_error,
+                watchdog,
                 #[cfg(target_os = "macos")]
                 native_menu: None,
             }))
