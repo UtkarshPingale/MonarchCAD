@@ -9,3 +9,8 @@
 *.swp
 /apps/cadcraft-web/dist/
 /.claude/worktrees/
+*.db
+__pycache__/
+monarch_license.json
+backend/tiles_cache/
+scratch/

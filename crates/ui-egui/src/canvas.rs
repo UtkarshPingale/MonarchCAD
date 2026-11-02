@@ -19,19 +19,105 @@ pub struct Xf {
     pub center: Vec2,
     /// Pixels (points) per drawing unit.
     pub scale: f64,
+    /// View twist: 0 = 0° (North Up), 1 = 90° CW (West Up), 2 = 180° (South Up), 3 = 270° CW (East Up)
+    pub twist: u8,
+    /// Front elevation view
+    pub is_front: bool,
+    /// Left elevation view
+    pub is_left: bool,
 }
 
 impl Xf {
+    pub fn new(rect: Rect, center: Vec2, scale: f64) -> Self {
+        Self { rect, center, scale, twist: 0, is_front: false, is_left: false }
+    }
+
+    pub fn with_view(rect: Rect, center: Vec2, scale: f64, twist: u8, view_name: &str) -> Self {
+        let is_front = view_name.eq_ignore_ascii_case("front");
+        let is_left = view_name.eq_ignore_ascii_case("left");
+        Self { rect, center, scale, twist: twist % 4, is_front, is_left }
+    }
+
     pub fn to_screen(&self, p: Vec2) -> Pos2 {
         let c = self.rect.center();
-        pos2(c.x + ((p.x - self.center.x) * self.scale) as f32, c.y - ((p.y - self.center.y) * self.scale) as f32)
+        if self.is_front {
+            let dx = ((p.x - self.center.x) * self.scale) as f32;
+            return pos2(c.x + dx, c.y);
+        }
+        if self.is_left {
+            let dx = ((p.y - self.center.y) * self.scale) as f32;
+            return pos2(c.x + dx, c.y);
+        }
+        let dx = ((p.x - self.center.x) * self.scale) as f32;
+        let dy = ((p.y - self.center.y) * self.scale) as f32;
+        match self.twist {
+            1 => pos2(c.x + dy, c.y + dx),
+            2 => pos2(c.x - dx, c.y + dy),
+            3 => pos2(c.x - dy, c.y - dx),
+            _ => pos2(c.x + dx, c.y - dy),
+        }
     }
+
     pub fn to_world(&self, p: Pos2) -> Vec2 {
         let c = self.rect.center();
-        Vec2::new(self.center.x + f64::from(p.x - c.x) / self.scale, self.center.y - f64::from(p.y - c.y) / self.scale)
+        let sx = f64::from(p.x - c.x) / self.scale;
+        let sy = f64::from(p.y - c.y) / self.scale;
+        if self.is_front {
+            return Vec2::new(self.center.x + sx, self.center.y);
+        }
+        if self.is_left {
+            return Vec2::new(self.center.x, self.center.y + sx);
+        }
+        match self.twist {
+            1 => Vec2::new(self.center.x + sy, self.center.y + sx),
+            2 => Vec2::new(self.center.x - sx, self.center.y + sy),
+            3 => Vec2::new(self.center.x - sy, self.center.y - sx),
+            _ => Vec2::new(self.center.x + sx, self.center.y - sy),
+        }
     }
+
     pub fn world_bounds(&self) -> Bounds2 {
-        Bounds2::new(self.to_world(self.rect.left_bottom()), self.to_world(self.rect.right_top()))
+        let p1 = self.to_world(self.rect.left_bottom());
+        let p2 = self.to_world(self.rect.right_bottom());
+        let p3 = self.to_world(self.rect.left_top());
+        let p4 = self.to_world(self.rect.right_top());
+        let min_x = p1.x.min(p2.x).min(p3.x).min(p4.x);
+        let max_x = p1.x.max(p2.x).max(p3.x).max(p4.x);
+        let min_y = p1.y.min(p2.y).min(p3.y).min(p4.y);
+        let max_y = p1.y.max(p2.y).max(p3.y).max(p4.y);
+        Bounds2::new(Vec2::new(min_x, min_y), Vec2::new(max_x, max_y))
+    }
+
+    pub fn gpu_xform(&self) -> [f32; 6] {
+        if self.is_front {
+            return [1.0, 0.0, 0.0, 0.00001, 0.0, 0.0];
+        }
+        if self.is_left {
+            return [0.0, 0.0, 1.0, 0.00001, 0.0, 0.0];
+        }
+        match self.twist {
+            1 => [0.0, -1.0, 1.0, 0.0, 0.0, 0.0],
+            2 => [-1.0, 0.0, 0.0, -1.0, 0.0, 0.0],
+            3 => [0.0, 1.0, -1.0, 0.0, 0.0, 0.0],
+            _ => crate::gpu::IDENTITY_XFORM,
+        }
+    }
+
+    pub fn gpu_offset(&self, origin: Vec2) -> [f32; 2] {
+        let dx0 = origin.x - self.center.x;
+        let dy0 = origin.y - self.center.y;
+        if self.is_front {
+            return [dx0 as f32, 0.0];
+        }
+        if self.is_left {
+            return [dy0 as f32, 0.0];
+        }
+        match self.twist {
+            1 => [dy0 as f32, -dx0 as f32],
+            2 => [-dx0 as f32, -dy0 as f32],
+            3 => [-dy0 as f32, dx0 as f32],
+            _ => [dx0 as f32, dy0 as f32],
+        }
     }
 }
 
@@ -523,7 +609,14 @@ fn ensure_vp_content(app: &mut CadApp, xf_paper: &Xf, ctx: &egui::Context) -> Op
     let (k, b) = vp_motion(&vp, c.view)?;
     c.motion = Some((k, b));
     // Paper p = k·p0 + b, so the list is drawn by the paper transform scaled by k about b.
-    let xf = Xf { rect: xf_paper.rect, center: (xf_paper.center - b) / k, scale: xf_paper.scale * k };
+    let xf = Xf {
+        rect: xf_paper.rect,
+        center: (xf_paper.center - b) / k,
+        scale: xf_paper.scale * k,
+        twist: xf_paper.twist,
+        is_front: xf_paper.is_front,
+        is_left: xf_paper.is_left,
+    };
     let on_screen = Rect::from_two_pos(xf_paper.to_screen(Vec2::new(rect.min.x, rect.max.y)), xf_paper.to_screen(Vec2::new(rect.max.x, rect.min.y)));
     Some(VpFrame { xf, on_screen, outline: clip.map(|p| p.polygon().to_vec()) })
 }
@@ -558,16 +651,18 @@ fn draw_vp_content(c: &mut VpContent, gpu: bool, p: &egui::Painter, f: &VpFrame,
         c.mesh_origin = origin;
     }
     let center = xf.rect.center();
+    let offset = xf.gpu_offset(c.mesh_origin);
+    let xform = xf.gpu_xform();
     p.add(egui_wgpu::Callback::new_paint_callback(
         xf.rect,
         crate::gpu::CanvasCallback {
             key,
             slot: c.mesh_slot.clone(),
-            offset: [(c.mesh_origin.x - xf.center.x) as f32, (c.mesh_origin.y - xf.center.y) as f32],
+            offset,
             scale: xf.scale as f32,
             center: [center.x, center.y],
             layer: crate::gpu::LAYER_VIEWPORT,
-            xform: crate::gpu::IDENTITY_XFORM,
+            xform,
             dash: 0.0,
             stencil,
         },
@@ -872,16 +967,18 @@ fn draw_highlight_gpu(
         *hl_origin = origin;
     }
     let center = xf.rect.center();
+    let offset = xf.gpu_offset(*hl_origin);
+    let xform = xf.gpu_xform();
     p.add(egui_wgpu::Callback::new_paint_callback(
         xf.rect,
         crate::gpu::CanvasCallback {
             key,
             slot: hl_slot.clone(),
-            offset: [(hl_origin.x - xf.center.x) as f32, (hl_origin.y - xf.center.y) as f32],
+            offset,
             scale: xf.scale as f32,
             center: [center.x, center.y],
             layer: crate::gpu::LAYER_HIGHLIGHT,
-            xform: crate::gpu::IDENTITY_XFORM,
+            xform,
             dash: if look.dashed { 10.0 } else { 0.0 },
             stencil,
         },
@@ -980,16 +1077,18 @@ fn draw_list_gpu(c: &mut CanvasState, p: &egui::Painter, xf: &Xf, bg: Rgb, lwdis
         c.mesh_ms = crate::now_ms() - t0;
     }
     let center = xf.rect.center();
+    let offset = xf.gpu_offset(c.mesh_origin);
+    let xform = xf.gpu_xform();
     p.add(egui_wgpu::Callback::new_paint_callback(
         xf.rect,
         crate::gpu::CanvasCallback {
             key,
             slot: c.mesh_slot.clone(),
-            offset: [(c.mesh_origin.x - xf.center.x) as f32, (c.mesh_origin.y - xf.center.y) as f32],
+            offset,
             scale: xf.scale as f32,
             center: [center.x, center.y],
             layer: crate::gpu::LAYER_DRAWING,
-            xform: crate::gpu::IDENTITY_XFORM,
+            xform,
             dash: 0.0,
             stencil: crate::gpu::Stencil::Off,
         },
@@ -1085,7 +1184,7 @@ mod highlight_stability_tests {
         let rect = Rect::from_min_size(Pos2::ZERO, vec2(600.0, 400.0));
         let input = egui::RawInput { screen_rect: Some(rect), events: vec![egui::Event::PointerMoved(pointer)], ..Default::default() };
         let mut output = ctx.run_ui(input, |ui| {
-            draw_highlight(ui.painter(), &Xf { rect, center: Vec2::ZERO, scale: 11.0 }, list, &[0], Color32::LIGHT_BLUE, look);
+            draw_highlight(ui.painter(), &Xf::new(rect, Vec2::ZERO, 11.0), list, &[0], Color32::LIGHT_BLUE, look);
         });
         let shapes = std::mem::take(&mut output.shapes);
         output.textures_delta.clear();
@@ -1142,7 +1241,7 @@ mod highlight_stability_tests {
             let dir = std::path::PathBuf::from(dir);
             std::fs::create_dir_all(&dir).unwrap();
             let mut h = egui_kittest::Harness::builder().with_size(vec2(600.0, 400.0)).build_ui(|ui| {
-                let xf = Xf { rect: ui.max_rect(), center: Vec2::new(3.5, 1.5), scale: 31.0 };
+                let xf = Xf::new(ui.max_rect(), Vec2::new(3.5, 1.5), 31.0);
                 draw_highlight(ui.painter(), &xf, &list, &[0], Color32::LIGHT_BLUE, Look { width: 2.0, dashed: true });
             });
             h.run_steps(3);
@@ -1365,7 +1464,7 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
     let Ok(st) = app.session.state() else { return };
     let view = st.view();
     let scale = f64::from(rect.height()) / view.height.max(1e-12);
-    let xf = Xf { rect, center: view.center, scale };
+    let xf = Xf::with_view(rect, view.center, scale, app.ui.view_twist, &app.ui.view_name);
     app.canvas.xf = Some(xf);
 
     // ---------- input ----------
@@ -1403,10 +1502,9 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
         // Pinch (and Cmd+scroll) still zoom via `zoom_delta` below.
         if let Ok(st) = app.session.state_mut() {
             let v = st.view();
-            st.set_view_quiet(cadcraft_engine::View {
-                center: v.center - Vec2::new(f64::from(scroll.x) / scale, -f64::from(scroll.y) / scale),
-                height: v.height,
-            });
+            let p0 = xf.rect.center();
+            let delta = xf.to_world(p0 + scroll) - xf.to_world(p0);
+            st.set_view_quiet(cadcraft_engine::View { center: v.center - delta, height: v.height });
         }
     }
     let opts = ui.ctx().options(|o| o.input_options);
@@ -1440,10 +1538,8 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
             let d = hp - last;
             if let Ok(st) = app.session.state_mut() {
                 let v = st.view();
-                st.set_view_quiet(cadcraft_engine::View {
-                    center: v.center - Vec2::new(f64::from(d.x) / scale, -f64::from(d.y) / scale),
-                    height: v.height,
-                });
+                let delta = xf.to_world(last + d) - xf.to_world(last);
+                st.set_view_quiet(cadcraft_engine::View { center: v.center - delta, height: v.height });
             }
         }
         app.canvas.pan_last = Some(hp);
@@ -1472,13 +1568,13 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
     // Re-read the view after navigation.
     let view = app.session.state().map(|s| s.view()).unwrap_or(view);
     let scale = f64::from(rect.height()) / view.height.max(1e-12);
-    let xf = Xf { rect, center: view.center, scale };
+    let xf = Xf::with_view(rect, view.center, scale, app.ui.view_twist, &app.ui.view_name);
     app.canvas.xf = Some(xf);
     // The paper (display) transform; equal to `xf` except inside an MSPACE viewport.
     let (xf_paper, active_vp) = match app.session.state() {
         Ok(st) => {
             let pv = st.paper_view();
-            let xp = Xf { rect, center: pv.center, scale: f64::from(rect.height()) / pv.height.max(1e-12) };
+            let xp = Xf::with_view(rect, pv.center, f64::from(rect.height()) / pv.height.max(1e-12), app.ui.view_twist, &app.ui.view_name);
             (if st.mspace.is_some() { xp } else { xf }, st.active_viewport().map(|(_, v)| v))
         }
         Err(_) => (xf, None),
@@ -1785,7 +1881,42 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
         }
         None => {
             blockedit::wash(app, &painter, rect);
+            if app.ui.show_map {
+                let (has_entities, doc_crs, title_info) = app
+                    .session
+                    .state()
+                    .map(|s| {
+                        let count = s.doc.entity_count();
+                        let crs = s.doc.header.get("GEO_CRS").and_then(|v| v.as_str()).map(|s| s.to_string());
+                        let title = format!("{} {}", s.title, s.path.as_deref().unwrap_or(""));
+                        (count > 0, crs, title)
+                    })
+                    .unwrap_or((false, None, String::new()));
+                if has_entities {
+                    let wb = xf.world_bounds();
+                    let width_px = rect.width();
+                    app.map_tiles.draw(ui.ctx(), &painter, &wb, |p| xf.to_screen(p), width_px, doc_crs.as_deref(), Some(&title_info));
+                }
+            }
             draw_grid(app, &painter, &xf);
+
+            let raster_imgs: Vec<cadcraft_doc::Image> = if let Ok(s) = app.session.state() {
+                s.doc
+                    .model
+                    .iter()
+                    .filter_map(|e| match &e.kind {
+                        cadcraft_doc::EntityKind::Image(img) => Some(img.clone()),
+                        _ => None,
+                    })
+                    .collect()
+            } else {
+                Vec::new()
+            };
+            if !raster_imgs.is_empty() {
+                let wb = xf.world_bounds();
+                app.raster_images.draw(ui.ctx(), &painter, &raster_imgs, |p| xf.to_screen(p), Some(&wb));
+            }
+
             Rgb(t.canvas.r(), t.canvas.g(), t.canvas.b())
         }
     };
@@ -1992,13 +2123,13 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
     draw_tiles(app, ui, &tiles);
     // UCS icon, ViewCube and viewport label.
     if app.ui.show_ucs_icon {
-        draw_ucs_icon(&painter, rect);
+        draw_ucs_icon(&painter, rect, app.ui.view_twist, &app.ui.view_name);
         crate::viewcube::ucs_icon(app, ui, rect);
     }
     if app.ui.show_viewcube && sheet.is_none() {
         draw_viewcube(app, ui, rect);
     }
-    viewport_label(&painter, rect);
+    viewport_label(&painter, rect, &app.ui.view_name);
     // Typing and Escape reach the command line even when its overlay is hidden.
     crate::cmdline::keyboard(app, ui.ctx());
     // Command line overlay.
@@ -2063,7 +2194,7 @@ fn tile_rects(app: &CadApp, full: Rect) -> Vec<(Rect, cadcraft_engine::ModelTile
 
 /// The world ↔ screen transform of a model tile drawn in `r`.
 fn tile_xf(r: Rect, tile: &cadcraft_engine::ModelTile) -> Xf {
-    Xf { rect: r, center: tile.view.center, scale: f64::from(r.height()) / tile.view.height.max(1e-12) }
+    Xf::new(r, tile.view.center, f64::from(r.height()) / tile.view.height.max(1e-12))
 }
 
 /// The tiles other than the current one (each with its own view, clipped to it), then the
@@ -2079,7 +2210,7 @@ fn draw_tiles(app: &CadApp, ui: &egui::Ui, tiles: &[(Rect, cadcraft_engine::Mode
         if let Some(list) = &app.canvas.list {
             draw_list(&p, &xf, list, bg, app.session.settings.lwdisplay);
         }
-        viewport_label(&p, *r);
+        viewport_label(&p, *r, &app.ui.view_name);
     }
     let p = ui.painter();
     for (r, tile) in tiles {
@@ -2532,22 +2663,73 @@ fn draw_lock(p: &egui::Painter, c: Pos2, color: Color32) {
     ));
 }
 
-fn draw_ucs_icon(p: &egui::Painter, rect: Rect) {
+fn draw_ucs_icon(p: &egui::Painter, rect: Rect, twist: u8, view_name: &str) {
     let t = Tokens::get();
-    let o = pos2(rect.left() + 36.0, rect.bottom() - 34.0);
     let st = Stroke::new(1.0, t.canvas_ink);
-    p.line_segment([o, o + vec2(60.0, 0.0)], st);
-    p.line_segment([o, o + vec2(0.0, -60.0)], st);
-    p.rect_stroke(Rect::from_center_size(o, vec2(9.0, 9.0)), 0.0, st, egui::StrokeKind::Middle);
     let f = egui::FontId::proportional(13.0);
-    p.text(o + vec2(70.0, 0.0), egui::Align2::LEFT_CENTER, crate::tl!("X"), f.clone(), t.canvas_ink);
-    p.text(o + vec2(0.0, -70.0), egui::Align2::CENTER_BOTTOM, crate::tl!("Y"), f, t.canvas_ink);
+
+    if view_name.eq_ignore_ascii_case("front") {
+        let o = pos2(rect.left() + 36.0, rect.bottom() - 34.0);
+        p.line_segment([o, o + vec2(60.0, 0.0)], st);
+        p.line_segment([o, o + vec2(0.0, -60.0)], st);
+        p.text(o + vec2(70.0, 0.0), egui::Align2::LEFT_CENTER, "X", f.clone(), t.canvas_ink);
+        p.text(o + vec2(0.0, -70.0), egui::Align2::CENTER_BOTTOM, "Z", f, t.canvas_ink);
+        return;
+    }
+
+    if view_name.eq_ignore_ascii_case("left") {
+        let o = pos2(rect.left() + 36.0, rect.bottom() - 34.0);
+        p.line_segment([o, o + vec2(60.0, 0.0)], st);
+        p.line_segment([o, o + vec2(0.0, -60.0)], st);
+        p.text(o + vec2(70.0, 0.0), egui::Align2::LEFT_CENTER, "Y", f.clone(), t.canvas_ink);
+        p.text(o + vec2(0.0, -70.0), egui::Align2::CENTER_BOTTOM, "Z", f, t.canvas_ink);
+        return;
+    }
+
+    match twist % 4 {
+        1 => {
+            // West is Up: +Y points right, +X points down (AutoCAD Screenshot 2)
+            let o = pos2(rect.left() + 36.0, rect.bottom() - 94.0);
+            p.line_segment([o, o + vec2(60.0, 0.0)], st);
+            p.line_segment([o, o + vec2(0.0, 60.0)], st);
+            p.rect_stroke(Rect::from_center_size(o, vec2(9.0, 9.0)), 0.0, st, egui::StrokeKind::Middle);
+            p.text(o + vec2(70.0, 0.0), egui::Align2::LEFT_CENTER, "Y", f.clone(), t.canvas_ink);
+            p.text(o + vec2(0.0, 70.0), egui::Align2::CENTER_TOP, "X", f, t.canvas_ink);
+        }
+        2 => {
+            // South is Up: +X points left, +Y points down
+            let o = pos2(rect.left() + 96.0, rect.bottom() - 94.0);
+            p.line_segment([o, o + vec2(-60.0, 0.0)], st);
+            p.line_segment([o, o + vec2(0.0, 60.0)], st);
+            p.rect_stroke(Rect::from_center_size(o, vec2(9.0, 9.0)), 0.0, st, egui::StrokeKind::Middle);
+            p.text(o + vec2(-70.0, 0.0), egui::Align2::RIGHT_CENTER, "X", f.clone(), t.canvas_ink);
+            p.text(o + vec2(0.0, 70.0), egui::Align2::CENTER_TOP, "Y", f, t.canvas_ink);
+        }
+        3 => {
+            // East is Up: +X points up, +Y points left (AutoCAD Screenshot 5)
+            let o = pos2(rect.left() + 96.0, rect.bottom() - 34.0);
+            p.line_segment([o, o + vec2(0.0, -60.0)], st);
+            p.line_segment([o, o + vec2(-60.0, 0.0)], st);
+            p.rect_stroke(Rect::from_center_size(o, vec2(9.0, 9.0)), 0.0, st, egui::StrokeKind::Middle);
+            p.text(o + vec2(0.0, -70.0), egui::Align2::CENTER_BOTTOM, "X", f.clone(), t.canvas_ink);
+            p.text(o + vec2(-70.0, 0.0), egui::Align2::RIGHT_CENTER, "Y", f, t.canvas_ink);
+        }
+        _ => {
+            // North is Up: +X points right, +Y points up (AutoCAD Screenshot 1)
+            let o = pos2(rect.left() + 36.0, rect.bottom() - 34.0);
+            p.line_segment([o, o + vec2(60.0, 0.0)], st);
+            p.line_segment([o, o + vec2(0.0, -60.0)], st);
+            p.rect_stroke(Rect::from_center_size(o, vec2(9.0, 9.0)), 0.0, st, egui::StrokeKind::Middle);
+            p.text(o + vec2(70.0, 0.0), egui::Align2::LEFT_CENTER, "X", f.clone(), t.canvas_ink);
+            p.text(o + vec2(0.0, -70.0), egui::Align2::CENTER_BOTTOM, "Y", f, t.canvas_ink);
+        }
+    }
 }
 
-fn viewport_label(p: &egui::Painter, rect: Rect) {
+fn viewport_label(p: &egui::Painter, rect: Rect, view_name: &str) {
     let t = Tokens::get();
     let at = pos2(rect.left() + 10.0, rect.top() + 8.0);
-    p.text(at, egui::Align2::LEFT_TOP, crate::tl!("+  |  Top  |  2D Wireframe"), crate::theme::small(), t.canvas_ink);
+    p.text(at, egui::Align2::LEFT_TOP, format!("[-][{}][2D Wireframe]", view_name), crate::theme::small(), t.canvas_ink);
 }
 
 fn draw_viewcube(app: &mut CadApp, ui: &mut egui::Ui, rect: Rect) {
@@ -2686,7 +2868,7 @@ pub(crate) mod tests {
         let h = d.add(&cadcraft_doc::Space::Model, common, cadcraft_doc::EntityKind::Line(line)).unwrap();
         let drag = cadcraft_engine::Drag { handles: vec![h], matrix: cadcraft_geom::Mat3::IDENTITY, extra: Vec::new(), clipboard: false };
         let rect = Rect::from_min_size(Pos2::ZERO, vec2(200.0, 100.0));
-        let xf = Xf { rect, center: Vec2::new(5.0, 0.0), scale: 10.0 };
+        let xf = Xf::new(rect, Vec2::new(5.0, 0.0), 10.0);
         let painter = egui::Painter::new(egui::Context::default(), egui::LayerId::background(), rect);
         // One canvas across the toggle: the cached drag mesh must be rebuilt.
         let mut c = CanvasState::default();

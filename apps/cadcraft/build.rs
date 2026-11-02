@@ -12,12 +12,12 @@ fn main() {
     if std::path::Path::new("../../assets/app-icon/cadcraft.ico").exists() {
         res.set_icon("../../assets/app-icon/cadcraft.ico");
     }
-    res.set("ProductName", "CADCraft")
-        .set("FileDescription", "CADCraft computer-aided design")
-        .set("CompanyName", "Learning Machines LLC")
-        .set("LegalCopyright", "Copyright (c) 2026 ArtCraft Team and the CADCraft contributors. MIT OR Apache-2.0.")
-        .set("OriginalFilename", "cadcraft.exe")
-        .set("InternalName", "cadcraft");
+    res.set("ProductName", "MonarchCAD")
+        .set("FileDescription", "MonarchCAD Computer-Aided Design")
+        .set("CompanyName", "MonarchCAD")
+        .set("LegalCopyright", "Copyright (c) 2026 MonarchCAD. MIT OR Apache-2.0.")
+        .set("OriginalFilename", "monarchcad.exe")
+        .set("InternalName", "monarchcad");
     if let Err(e) = res.compile() {
         if std::env::var_os("CADCRAFT_REQUIRE_WINRES").is_some() {
             eprintln!("embedding Windows resources failed: {e}");

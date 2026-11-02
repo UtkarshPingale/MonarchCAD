@@ -1358,3 +1358,37 @@
 	Discard	Скасувати зміни
 	Customize	Налаштування інтерфейсу
 	Edit Command Aliases (PGP)...	Редагувати псевдоніми команд (PGP)...
+	3D Views	3D види
+	Auto-Detect CRS	Автовизначення CRS
+	Back	Ззаду
+	Back View	Вигляд ззаду
+	Bottom	Знизу
+	Bottom View	Вигляд знизу
+	Clockwise	За годинниковою стрілкою
+	Coordinate System	Система координат
+	Counter-Clockwise	Проти годинникової стрілки
+	Cycle Coordinate System	Циклічна зміна системи координат
+	Front	Спереду
+	Front View	Вигляд спереду
+	Georeferenced Map	Геоприв'язана карта
+	Hybrid (Satellite + Labels)	Гібрид (супутник + підписи)
+	Left View	Вигляд зліва
+	Right View	Вигляд справа
+	Rotate View	Повернути вигляд
+	Rotate View 90° Clockwise	Повернути вигляд на 90° за годинниковою стрілкою
+	Rotate View 90° Counter-Clockwise	Повернути вигляд на 90° проти годинникової стрілки
+	Satellite (Aerial)	Супутник (аерофотознімок)
+	Street Map (OpenStreetMap)	Вулична карта (OpenStreetMap)
+	Top	Згори
+	Top View	Вигляд згори
+	Turn Off Map	Вимкнути карту
+	UTM Zone 42N (West Gujarat, West Rajasthan)	Зона UTM 42N (Західний Гуджарат, Західний Раджастхан)
+	UTM Zone 43N (Delhi, Ambala, Mumbai, West India)	Зона UTM 43N (Делі, Амбала, Мумбаї, Західна Індія)
+	UTM Zone 44N (Central/East India, UP, MP, AP)	Зона UTM 44N (Центральна/Східна Індія, УП, МП, АП)
+	UTM Zone 45N (Kolkata, Bengal, Assam, East India)	Зона UTM 45N (Колката, Бенгалія, Ассам, Східна Індія)
+	WGS 84 (Degrees)	WGS 84 (градуси)
+	Web Mercator (Meters)	Web Mercator (метри)
+	Import Points...	Імпорт точок...
+	Import Points	Імпорт точок
+	Raster Image (ECW)...	Растрове зображення (ECW)...
+	Shapefile (SHP)...	Шейп-файл (SHP)...

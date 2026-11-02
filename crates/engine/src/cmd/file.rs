@@ -260,12 +260,30 @@ pub struct ReadFile {
     path: Option<String>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+fn read_file_source(path: &str) -> std::io::Result<Vec<u8>> {
+    let ext = std::path::Path::new(path).extension().map(|e| e.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
+    if ext == "ecw" {
+        // ECW orthomosaics can be dozens of gigabytes; reading the entire file into a RAM buffer
+        // is unnecessary and causes out-of-memory or seconds of disk delay.
+        // The ECW decoder directly opens and seeks on the file path.
+        use std::io::Read;
+        let mut f = std::fs::File::open(path)?;
+        let mut buf = vec![0u8; 65536];
+        let n = f.read(&mut buf)?;
+        buf.truncate(n);
+        Ok(buf)
+    } else {
+        std::fs::read(path)
+    }
+}
+
 /// Read and decode `path` (the slow half of `OPEN {path}`). Needs no session; runs anywhere.
 pub fn read_file(path: &str) -> std::result::Result<ReadFile, String> {
     #[cfg(not(target_arch = "wasm32"))]
     {
         let r = std::panic::catch_unwind(|| {
-            let bytes = std::fs::read(path).map_err(|e| bad("open", format!("{path}: {e}")))?;
+            let bytes = read_file_source(path).map_err(|e| bad("open", format!("{path}: {e}")))?;
             read_bytes(&bytes, path, Some(path.to_string()))
         });
         match r {
@@ -332,7 +350,7 @@ fn run_open(s: &mut Session, p: &Value) -> Result<Value> {
         let path = _path;
         #[cfg(not(target_arch = "wasm32"))]
         {
-            let bytes = std::fs::read(path).map_err(|e| bad("open", format!("{path}: {e}")))?;
+            let bytes = read_file_source(path).map_err(|e| bad("open", format!("{path}: {e}")))?;
             let i = open_bytes(s, &bytes, path, Some(path.to_string()))?;
             super::blocks::xref::after_open(s, i);
             return Ok(opened(s, i, true));

@@ -49,6 +49,9 @@ pub mod viewcube;
 pub mod vpscale;
 
 pub mod exchange;
+pub mod import_points_dlg;
+pub mod map_tiles;
+pub mod raster_images;
 
 use std::sync::mpsc::Receiver;
 
@@ -80,6 +83,10 @@ pub struct UiState {
     pub show_viewcube: bool,
     pub show_ucs_icon: bool,
     pub show_layer_list: bool,
+    /// OpenStreetMap background tile layer toggle.
+    pub show_map: bool,
+    /// Map opacity (0.0 .. 1.0).
+    pub map_opacity: f32,
     /// Keep the system cursor visible over the drawing area (a small crosshair at the centre of the
     /// drawn one) instead of hiding it. Screen magnifiers (Windows Magnifier "follow the mouse
     /// pointer"), screen readers, recorders and remote desktops track the system cursor and lose it
@@ -107,6 +114,10 @@ pub struct UiState {
     /// The version Save As writes for a drawing that has no file yet ("2000" … "2018"); a
     /// drawing opened from a file keeps that file's version.
     pub save_version: String,
+    /// View twist orientation: 0 = 0° (North Up), 1 = 90° (West Up), 2 = 180° (South Up), 3 = 270° (East Up).
+    pub view_twist: u8,
+    /// Active orthographic/standard view: "Top", "Bottom", "Front", "Back", "Left", "Right".
+    pub view_name: String,
     /// Drawings opened from a path, newest first (File ▸ Open Recent and the Start page).
     pub recent_files: Vec<String>,
 }
@@ -166,6 +177,8 @@ impl Default for UiState {
             show_viewcube: true,
             show_ucs_icon: true,
             show_layer_list: false,
+            show_map: false,
+            map_opacity: 0.85,
             system_cursor: std::env::var("CADCRAFT_SYSTEM_CURSOR").is_ok_and(|v| !matches!(v.trim(), "" | "0" | "false" | "off")),
             toolset_tab: "Drafting".into(),
             collapsed_groups: Vec::new(),
@@ -179,6 +192,8 @@ impl Default for UiState {
             animations: animation::AnimationPref::default(),
             save_format: SaveFormat::default(),
             save_version: SaveVersion::default().year().to_string(),
+            view_twist: 0,
+            view_name: "Top".into(),
             recent_files: Vec::new(),
         }
     }
@@ -189,6 +204,9 @@ impl Default for UiState {
 pub struct Services {
     pub pick_open: Option<Box<dyn Fn() -> Option<String>>>,
     pub pick_save: Option<Box<dyn Fn(&str) -> Option<String>>>,
+    pub pick_points: Option<Box<dyn Fn() -> Option<String>>>,
+    pub pick_shp: Option<Box<dyn Fn() -> Option<String>>>,
+    pub pick_raster: Option<Box<dyn Fn() -> Option<String>>>,
 }
 
 pub struct CadApp {
@@ -248,11 +266,19 @@ pub struct CadApp {
     pub hatch_dlg: Option<hatchdlg::HatchDlgState>,
     /// The Edit Block Definition dialog ([`bedit`]).
     pub bedit: bedit::State,
+    /// Georeferenced OpenStreetMap background tile manager.
+    pub map_tiles: map_tiles::TileManager,
+    /// Civil 3D Import Points dialog state while open.
+    pub import_points_dlg: Option<import_points_dlg::ImportPointsState>,
+    /// Raster image and orthomosaic texture manager.
+    pub raster_images: raster_images::RasterImageManager,
 }
 
 impl CadApp {
     pub fn new(session: Session, services: Services) -> Self {
         CadApp {
+            map_tiles: map_tiles::TileManager::default(),
+            raster_images: raster_images::RasterImageManager::default(),
             system_languages: Vec::new(),
             system_animations: None,
             session,
@@ -288,6 +314,7 @@ impl CadApp {
             alias_dlg: None,
             hatch_dlg: None,
             bedit: bedit::State::default(),
+            import_points_dlg: None,
         }
     }
 
@@ -348,8 +375,18 @@ impl CadApp {
             let first = text.split_whitespace().next().unwrap_or("");
             // `cmd {json}` is a programmatic call: the engine runs it with those parameters.
             let json_form = text.trim_start().get(first.len()..).is_some_and(|rest| rest.trim_start().starts_with('{'));
-            if !first.is_empty() && !json_form && menus::run_ui_command(self, &first.to_ascii_lowercase(), &Value::Null).is_some() {
-                return None;
+            if !first.is_empty() && !json_form {
+                let rest = text.trim_start().get(first.len()..).unwrap_or("").trim();
+                let params = if rest.eq_ignore_ascii_case("on") || rest == "1" {
+                    serde_json::json!({"on": true})
+                } else if rest.eq_ignore_ascii_case("off") || rest == "0" {
+                    serde_json::json!({"on": false})
+                } else {
+                    Value::Null
+                };
+                if menus::run_ui_command(self, &first.to_ascii_lowercase(), &params).is_some() {
+                    return None;
+                }
             }
         }
         let e = self.session.cmdline(text).err()?.to_string();

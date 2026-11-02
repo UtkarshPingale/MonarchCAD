@@ -105,6 +105,7 @@ pub enum Icon {
     Sun,
     Snowflake,
     Grid,
+    Map,
     Snap,
     Ortho,
     Polar,
@@ -724,6 +725,12 @@ pub fn paint(p: &Painter, rect: Rect, icon: Icon, dim: bool) {
                 pen.l(v, 3.0, v, 21.0);
                 pen.l(3.0, v, 21.0, v);
             }
+        }
+        Map => {
+            pen.poly(&[(3.0, 6.0), (9.0, 4.0), (15.0, 6.0), (21.0, 4.0), (21.0, 18.0), (15.0, 20.0), (9.0, 18.0), (3.0, 20.0)], true, b);
+            pen.l(9.0, 4.0, 9.0, 18.0);
+            pen.l(15.0, 6.0, 15.0, 20.0);
+            pen.c(12.0, 11.0, 2.0, a);
         }
         Snap => {
             for i in 0..4 {

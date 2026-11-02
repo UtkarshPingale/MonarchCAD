@@ -34,7 +34,15 @@ pub fn specs() -> Vec<CommandSpec> {
         CommandSpec::new("import", "Import...", run_import)
             .menu(&["File", "Import..."])
             .alias(&["imp"])
-            .params("{path | data: base64, name?: \"x.dwg\"} (DXF or DWG), at?: [x,y] (default 0,0), scale?: (default 1) → {imported, handles, layers, styles, blocks}"),
+            .params("{path | data: base64, name?: \"x.dwg\"} (DXF, DWG, SVG, SHP or ECW), at?: [x,y] (default 0,0), scale?: (default 1) → {imported, handles, layers, styles, blocks}"),
+        CommandSpec::new("mapimport", "Shapefile (SHP)...", run_mapimport)
+            .menu(&["Insert", "Shapefile (SHP)..."])
+            .alias(&["shpimport", "shp", "gisimport"])
+            .params("{path | data: base64, name?: \"layer.shp\"} (ESRI Shapefile), at?: [x,y] (default 0,0), scale?: (default 1) → {imported, handles, layers, styles, blocks}"),
+        CommandSpec::new("imageattach", "Raster Image (ECW)...", run_imageattach)
+            .menu(&["Insert", "Raster Image (ECW)..."])
+            .alias(&["image", "img", "ecw", "ecwimport", "rasterimage"])
+            .params("{path | data: base64, name?: \"photo.ecw\"} (ECW, PNG, JPEG, TIFF or BMP), at?: [x,y] (default 0,0), scale?: (default 1) → {imported, handles, layers, styles, blocks}"),
         CommandSpec::new("export", "Export...", run_export)
             .menu(&["File", "Export..."])
             .alias(&["exp"])
@@ -139,6 +147,14 @@ fn run_import(s: &mut Session, p: &Value) -> Result<Value> {
     import_drawing(s, &src, at, scale, &file)
 }
 
+fn run_mapimport(s: &mut Session, p: &Value) -> Result<Value> {
+    run_import(s, p)
+}
+
+fn run_imageattach(s: &mut Session, p: &Value) -> Result<Value> {
+    run_import(s, p)
+}
+
 /// Copy `src`'s model space into the current space (scaled about the origin, then moved to
 /// `at`), with the layers, linetypes, styles and blocks it needs.
 fn import_drawing(s: &mut Session, src: &Drawing, at: Vec2, scale: f64, file: &str) -> Result<Value> {
@@ -147,6 +163,21 @@ fn import_drawing(s: &mut Session, src: &Drawing, at: Vec2, scale: f64, file: &s
     let space = s.space();
     let d = s.doc_mut()?;
     let (layers, styles) = merge_tables(d, src);
+    if let Some(crs) = src.header.get("GEO_CRS") {
+        d.header.set("GEO_CRS", crs.clone());
+    }
+    if let Some(crs) = src.header.get("CRS") {
+        d.header.set("CRS", crs.clone());
+    }
+    if d.header.i64("PDMODE", 0) == 0 && src.header.i64("PDMODE", 0) != 0 {
+        d.header.set("PDMODE", cadcraft_doc::HVal::Int(src.header.i64("PDMODE", 35)));
+        d.header.set("PDSIZE", cadcraft_doc::HVal::Real(0.0));
+    }
+    if let Some(u) = src.header.get("INSUNITS")
+        && (d.header.get("INSUNITS").is_none() || d.header.i64("INSUNITS", 0) == 0)
+    {
+        d.header.set("INSUNITS", u.clone());
+    }
     let renames = block_names(d, src);
     for (from, to) in &renames {
         let Some(b) = src.blocks.get(from) else { continue };
@@ -185,7 +216,17 @@ fn import_drawing(s: &mut Session, src: &Drawing, at: Vec2, scale: f64, file: &s
 fn read_file(_path: &str) -> Result<Vec<u8>> {
     #[cfg(not(target_arch = "wasm32"))]
     {
-        std::fs::read(_path).map_err(|e| bad("import", format!("{_path}: {e}")))
+        let ext = std::path::Path::new(_path).extension().map(|e| e.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
+        if ext == "ecw" {
+            use std::io::Read;
+            let mut f = std::fs::File::open(_path).map_err(|e| bad("import", format!("{_path}: {e}")))?;
+            let mut buf = vec![0u8; 65536];
+            let n = f.read(&mut buf).map_err(|e| bad("import", format!("{_path}: {e}")))?;
+            buf.truncate(n);
+            Ok(buf)
+        } else {
+            std::fs::read(_path).map_err(|e| bad("import", format!("{_path}: {e}")))
+        }
     }
     #[cfg(target_arch = "wasm32")]
     Err(bad("import", "paths are not available on the web; pass `data`"))

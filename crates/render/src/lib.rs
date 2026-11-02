@@ -1223,8 +1223,6 @@ fn entity_parts(b: &mut Builder, ctx: &Ctx, e: &Entity) {
             let u = i.u.xy() * i.size.x;
             let v = i.v.xy() * i.size.y;
             b.polyline(ctx, rgb, lw, &[o, o + u, o + u + v, o + v, o]);
-            b.polyline(ctx, rgb, lw, &[o, o + u + v]);
-            b.polyline(ctx, rgb, lw, &[o + u, o + v]);
         }
         EntityKind::Table(t) => table(b, ctx, t, rgb, lw),
         EntityKind::Tolerance(t) => tolerance::draw(b, ctx, e, t, lw, tol),

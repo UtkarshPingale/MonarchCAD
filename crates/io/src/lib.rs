@@ -5,6 +5,7 @@
 /// What a DXF file holds that CADCraft doesn't model, kept and written back (#528).
 mod dxf_raw;
 
+pub mod csv_read;
 mod dxf_ext;
 mod dxf_image;
 mod dxf_mleader;
@@ -12,8 +13,11 @@ mod dxf_read;
 mod dxf_table;
 mod dxf_write;
 mod dxf_xref;
+pub mod ecw;
+pub mod ecw_read;
 pub mod pdf;
 pub mod plotter;
+pub mod shp_read;
 pub mod svg;
 mod svg_read;
 
@@ -24,9 +28,12 @@ use cadcraft_doc::{Drawing, Space};
 use cadcraft_geom::Bounds2;
 
 pub use cadcraft_dxf::Version;
+pub use csv_read::{PointFileFormat, PointImportOptions, SurveyPoint, import_points_into, parse_survey_points};
 pub use dxf_read::entity_from_groups;
 pub use dxf_write::entity_groups;
+pub use ecw_read::import_into as import_ecw;
 pub use pdf::{PdfOptions, pdf, plot};
+pub use shp_read::import_into as import_shp;
 
 /// How a drawing is saved as DXF or DWG.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -58,7 +65,7 @@ fn ext(name: &str) -> String {
 }
 
 /// Read a drawing; the format comes from the content (DXF ASCII/binary, DWG) or the name
-/// (SVG and gzip-compressed SVGZ).
+/// (SVG and gzip-compressed SVGZ, or ESRI Shapefile SHP).
 pub fn read(bytes: &[u8], name: &str) -> Result<Drawing> {
     if cadcraft_dwg::is_dwg(bytes) {
         let (dxf, notes) = cadcraft_dwg::dwg_to_dxf_noted(bytes, cadcraft_dwg::Limits::DEFAULT).map_err(IoError::Format)?;
@@ -68,6 +75,9 @@ pub fn read(bytes: &[u8], name: &str) -> Result<Drawing> {
     }
     match ext(name).as_str() {
         "svg" | "svgz" => svg_read::read(bytes),
+        "shp" => shp_read::read(bytes, name),
+        "ecw" => ecw_read::read(bytes, name),
+        "csv" | "txt" | "xyz" | "asc" | "dat" => csv_read::read(bytes, name),
         "dxf" | "" => dxf_read::read(bytes),
         e if bytes.len() > 4 => dxf_read::read(bytes).map_err(|_| IoError::Unsupported(e.to_string())),
         e => Err(IoError::Unsupported(e.to_string())),

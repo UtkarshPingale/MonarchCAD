@@ -39,6 +39,46 @@ pub const UI_COMMANDS: &[(&str, &str, &[&str], Option<&str>)] = &[
     ("ui.toggle.cmdline", "Command Line", &["Window", "Command Line"], Some("Cmd+9")),
     ("ui.toggle.viewcube", "ViewCube", &["View", "ViewCube", "On"], None),
     ("ui.toggle.ucsicon", "UCS Icon", &["View", "UCS Icon", "On"], None),
+    ("geomap.satellite", "Satellite (Aerial)", &["View", "Georeferenced Map", "Satellite (Aerial)"], None),
+    ("geomap.hybrid", "Hybrid (Satellite + Labels)", &["View", "Georeferenced Map", "Hybrid (Satellite + Labels)"], None),
+    ("geomap.street", "Street Map (OpenStreetMap)", &["View", "Georeferenced Map", "Street Map (OpenStreetMap)"], None),
+    ("geomap.off", "Turn Off Map", &["View", "Georeferenced Map", "Turn Off Map"], None),
+    ("crs.cycle", "Cycle Coordinate System", &[], None),
+    ("crs.auto", "Auto-Detect CRS", &["View", "Georeferenced Map", "Coordinate System", "Auto-Detect CRS"], None),
+    (
+        "crs.utm43n",
+        "UTM Zone 43N (Delhi, Ambala, Mumbai, West India)",
+        &["View", "Georeferenced Map", "Coordinate System", "UTM Zone 43N (Delhi, Ambala, Mumbai, West India)"],
+        None,
+    ),
+    (
+        "crs.utm44n",
+        "UTM Zone 44N (Central/East India, UP, MP, AP)",
+        &["View", "Georeferenced Map", "Coordinate System", "UTM Zone 44N (Central/East India, UP, MP, AP)"],
+        None,
+    ),
+    (
+        "crs.utm45n",
+        "UTM Zone 45N (Kolkata, Bengal, Assam, East India)",
+        &["View", "Georeferenced Map", "Coordinate System", "UTM Zone 45N (Kolkata, Bengal, Assam, East India)"],
+        None,
+    ),
+    (
+        "crs.utm42n",
+        "UTM Zone 42N (West Gujarat, West Rajasthan)",
+        &["View", "Georeferenced Map", "Coordinate System", "UTM Zone 42N (West Gujarat, West Rajasthan)"],
+        None,
+    ),
+    ("crs.wgs84", "WGS 84 (Degrees)", &["View", "Georeferenced Map", "Coordinate System", "WGS 84 (Degrees)"], None),
+    ("crs.mercator", "Web Mercator (Meters)", &["View", "Georeferenced Map", "Coordinate System", "Web Mercator (Meters)"], None),
+    ("view.twist.cw", "Rotate View 90° Clockwise", &["View", "Rotate View", "Clockwise"], None),
+    ("view.twist.ccw", "Rotate View 90° Counter-Clockwise", &["View", "Rotate View", "Counter-Clockwise"], None),
+    ("view.top", "Top View", &["View", "3D Views", "Top"], None),
+    ("view.front", "Front View", &["View", "3D Views", "Front"], None),
+    ("view.left", "Left View", &["View", "3D Views", "Left"], None),
+    ("view.right", "Right View", &["View", "3D Views", "Right"], None),
+    ("view.back", "Back View", &["View", "3D Views", "Back"], None),
+    ("view.bottom", "Bottom View", &["View", "3D Views", "Bottom"], None),
     ("ui.theme.system", "Use System Setting", &["View", "Interface Theme", "Use System Setting"], None),
     ("ui.theme.light", "Light", &["View", "Interface Theme", "Light"], None),
     ("ui.theme.dark", "Dark", &["View", "Interface Theme", "Dark"], None),
@@ -62,6 +102,7 @@ pub const UI_COMMANDS: &[(&str, &str, &[&str], Option<&str>)] = &[
     ("ui.dialog.qselect", "Quick Select...", &[], None),
     ("ui.dialog.parameters", "Parameters Manager", &["Window", "Parameters Manager"], None),
     ("ui.dialog.dsettings", "Drafting Settings...", &[], None),
+    ("ui.dialog.importpoints", "Import Points...", &["Insert", "Import Points..."], None),
     ("ui.dialog.about", "About CADCraft", &["Help", "About CADCraft"], None),
     ("ui.dialog.commands", "Command Reference", &["Help", "CADCraft Help"], Some("F1")),
     ("ui.toggle.history", "Command History", &["Window", "Command History"], Some("F2")),
@@ -219,7 +260,10 @@ fn run_ui_command_inner(app: &mut CadApp, id: &str, params: &Value) -> Option<Re
             Ok(Value::Null)
         }
         // Typed or chosen from a menu or the tool bar: ask for the file (or show the preview).
-        "export" | "exp" | "import" | "imp" | "publish" | "preview" | "pre" if params.is_null() && app.session.state().is_ok() => {
+        "export" | "exp" | "import" | "imp" | "shpimport" | "mapimport" | "shp" | "gisimport" | "imageattach" | "image" | "img" | "ecw"
+        | "ecwimport" | "rasterimage" | "publish" | "preview" | "pre"
+            if params.is_null() && app.session.state().is_ok() =>
+        {
             return Some(crate::exchange::route(app, id));
         }
         "ui.toggle.statusbar" => {
@@ -240,6 +284,299 @@ fn run_ui_command_inner(app: &mut CadApp, id: &str, params: &Value) -> Option<Re
         }
         "ui.toggle.ucsicon" => {
             toggle(&mut app.ui.show_ucs_icon, params);
+            Ok(Value::Null)
+        }
+        "geomap.satellite" | "satellite" | "geomap.aerial" | "aerial" => {
+            app.ui.show_map = true;
+            app.map_tiles.show_map = true;
+            app.map_tiles.mode = crate::map_tiles::MapMode::Satellite;
+            app.session.echo("Satellite imagery (aerial view) ON");
+            Ok(Value::Null)
+        }
+        "geomap.hybrid" | "hybrid" => {
+            app.ui.show_map = true;
+            app.map_tiles.show_map = true;
+            app.map_tiles.mode = crate::map_tiles::MapMode::Hybrid;
+            app.session.echo("Hybrid satellite imagery (aerial + labels) ON");
+            Ok(Value::Null)
+        }
+        "geomap.street" | "street" | "osm" => {
+            app.ui.show_map = true;
+            app.map_tiles.show_map = true;
+            app.map_tiles.mode = crate::map_tiles::MapMode::Street;
+            app.session.echo("OpenStreetMap (OSM) street map layer ON");
+            Ok(Value::Null)
+        }
+        "geomap.off" | "mapoff" | "osmoff" => {
+            app.ui.show_map = false;
+            app.map_tiles.show_map = false;
+            app.session.echo("Georeferenced map layer OFF");
+            Ok(Value::Null)
+        }
+        "geomap.toggle" | "geomap" | "map" => {
+            if let Some(mode_str) = params.as_str().or_else(|| params.get("mode").and_then(|v| v.as_str())) {
+                match mode_str.to_ascii_lowercase().as_str() {
+                    "satellite" | "aerial" | "sat" => {
+                        app.ui.show_map = true;
+                        app.map_tiles.show_map = true;
+                        app.map_tiles.mode = crate::map_tiles::MapMode::Satellite;
+                    }
+                    "hybrid" | "hyb" => {
+                        app.ui.show_map = true;
+                        app.map_tiles.show_map = true;
+                        app.map_tiles.mode = crate::map_tiles::MapMode::Hybrid;
+                    }
+                    "street" | "osm" | "road" => {
+                        app.ui.show_map = true;
+                        app.map_tiles.show_map = true;
+                        app.map_tiles.mode = crate::map_tiles::MapMode::Street;
+                    }
+                    "off" => {
+                        app.ui.show_map = false;
+                        app.map_tiles.show_map = false;
+                    }
+                    _ => {
+                        toggle(&mut app.ui.show_map, params);
+                        app.map_tiles.show_map = app.ui.show_map;
+                    }
+                }
+            } else {
+                toggle(&mut app.ui.show_map, params);
+                app.map_tiles.show_map = app.ui.show_map;
+            }
+            let status = if app.ui.show_map {
+                format!("{} background layer ON", app.map_tiles.mode.display_name())
+            } else {
+                "Georeferenced background map layer OFF".to_string()
+            };
+            app.session.echo(status);
+            Ok(Value::Null)
+        }
+        "crs.cycle" => {
+            let (new_crs, name, code) = match app.map_tiles.manual_crs {
+                Some(crate::map_tiles::CoordSystem::Utm { zone: 43, north: true }) => {
+                    (Some(crate::map_tiles::CoordSystem::Utm { zone: 44, north: true }), "UTM Zone 44N (Central/East India, UP, MP, AP)", "UTM_44N")
+                }
+                Some(crate::map_tiles::CoordSystem::Utm { zone: 44, north: true }) => (
+                    Some(crate::map_tiles::CoordSystem::Utm { zone: 45, north: true }),
+                    "UTM Zone 45N (Kolkata, Bengal, Assam, East India)",
+                    "UTM_45N",
+                ),
+                Some(crate::map_tiles::CoordSystem::Utm { zone: 45, north: true }) => {
+                    (Some(crate::map_tiles::CoordSystem::Utm { zone: 42, north: true }), "UTM Zone 42N (West Gujarat, West Rajasthan)", "UTM_42N")
+                }
+                Some(crate::map_tiles::CoordSystem::Utm { zone: 42, north: true }) => {
+                    (Some(crate::map_tiles::CoordSystem::Wgs84), "WGS 84 (Latitude / Longitude Degrees)", "WGS84")
+                }
+                Some(crate::map_tiles::CoordSystem::Wgs84) => {
+                    (Some(crate::map_tiles::CoordSystem::WebMercator), "Web Mercator (EPSG:3857)", "EPSG_3857")
+                }
+                Some(crate::map_tiles::CoordSystem::WebMercator) => (None, "Auto-Detect CRS", "AUTO"),
+                _ => (
+                    Some(crate::map_tiles::CoordSystem::Utm { zone: 43, north: true }),
+                    "UTM Zone 43N (Delhi, Ambala, Mumbai, West India)",
+                    "UTM_43N",
+                ),
+            };
+            app.map_tiles.manual_crs = new_crs;
+            if let Ok(d) = app.session.doc_mut() {
+                d.header.set("GEO_CRS", cadcraft_doc::HVal::Str(code.to_string()));
+            }
+            app.session.echo(format!("CRS switched to: {name}"));
+            Ok(Value::Null)
+        }
+        "crs.utm43n" | "crs.43n" => {
+            app.map_tiles.manual_crs = Some(crate::map_tiles::CoordSystem::Utm { zone: 43, north: true });
+            if let Ok(d) = app.session.doc_mut() {
+                d.header.set("GEO_CRS", cadcraft_doc::HVal::Str("UTM_43N".to_string()));
+            }
+            app.session.echo("CRS set to UTM Zone 43N (Delhi, Ambala, Mumbai, West India)");
+            Ok(Value::Null)
+        }
+        "crs.utm44n" | "crs.44n" => {
+            app.map_tiles.manual_crs = Some(crate::map_tiles::CoordSystem::Utm { zone: 44, north: true });
+            if let Ok(d) = app.session.doc_mut() {
+                d.header.set("GEO_CRS", cadcraft_doc::HVal::Str("UTM_44N".to_string()));
+            }
+            app.session.echo("CRS set to UTM Zone 44N (Central/East India, UP, MP, AP)");
+            Ok(Value::Null)
+        }
+        "crs.utm45n" | "crs.45n" => {
+            app.map_tiles.manual_crs = Some(crate::map_tiles::CoordSystem::Utm { zone: 45, north: true });
+            if let Ok(d) = app.session.doc_mut() {
+                d.header.set("GEO_CRS", cadcraft_doc::HVal::Str("UTM_45N".to_string()));
+            }
+            app.session.echo("CRS set to UTM Zone 45N (Kolkata, Bengal, Assam, East India)");
+            Ok(Value::Null)
+        }
+        "crs.utm42n" | "crs.42n" => {
+            app.map_tiles.manual_crs = Some(crate::map_tiles::CoordSystem::Utm { zone: 42, north: true });
+            if let Ok(d) = app.session.doc_mut() {
+                d.header.set("GEO_CRS", cadcraft_doc::HVal::Str("UTM_42N".to_string()));
+            }
+            app.session.echo("CRS set to UTM Zone 42N (West Gujarat, West Rajasthan)");
+            Ok(Value::Null)
+        }
+        "crs.wgs84" => {
+            app.map_tiles.manual_crs = Some(crate::map_tiles::CoordSystem::Wgs84);
+            if let Ok(d) = app.session.doc_mut() {
+                d.header.set("GEO_CRS", cadcraft_doc::HVal::Str("WGS84".to_string()));
+            }
+            app.session.echo("CRS set to WGS 84 (Latitude / Longitude Degrees)");
+            Ok(Value::Null)
+        }
+        "crs.mercator" => {
+            app.map_tiles.manual_crs = Some(crate::map_tiles::CoordSystem::WebMercator);
+            if let Ok(d) = app.session.doc_mut() {
+                d.header.set("GEO_CRS", cadcraft_doc::HVal::Str("EPSG_3857".to_string()));
+            }
+            app.session.echo("CRS set to Web Mercator (EPSG:3857)");
+            Ok(Value::Null)
+        }
+        "crs.auto" => {
+            app.map_tiles.manual_crs = None;
+            if let Ok(d) = app.session.doc_mut() {
+                d.header.set("GEO_CRS", cadcraft_doc::HVal::Str("AUTO".to_string()));
+            }
+            app.session.echo("CRS set to Auto-Detect");
+            Ok(Value::Null)
+        }
+        "crs" => {
+            if let Some(arg) = params.as_str().or_else(|| params.get("crs").and_then(|v| v.as_str())) {
+                let upper = arg.trim().to_ascii_uppercase();
+                if upper.contains("43") {
+                    app.map_tiles.manual_crs = Some(crate::map_tiles::CoordSystem::Utm { zone: 43, north: true });
+                    if let Ok(d) = app.session.doc_mut() {
+                        d.header.set("GEO_CRS", cadcraft_doc::HVal::Str("UTM_43N".to_string()));
+                    }
+                    app.session.echo("CRS set to UTM Zone 43N (Delhi, Ambala, Mumbai, West India)");
+                } else if upper.contains("44") {
+                    app.map_tiles.manual_crs = Some(crate::map_tiles::CoordSystem::Utm { zone: 44, north: true });
+                    if let Ok(d) = app.session.doc_mut() {
+                        d.header.set("GEO_CRS", cadcraft_doc::HVal::Str("UTM_44N".to_string()));
+                    }
+                    app.session.echo("CRS set to UTM Zone 44N (Central/East India, UP, MP, AP)");
+                } else if upper.contains("45") {
+                    app.map_tiles.manual_crs = Some(crate::map_tiles::CoordSystem::Utm { zone: 45, north: true });
+                    if let Ok(d) = app.session.doc_mut() {
+                        d.header.set("GEO_CRS", cadcraft_doc::HVal::Str("UTM_45N".to_string()));
+                    }
+                    app.session.echo("CRS set to UTM Zone 45N (Kolkata, Bengal, Assam, East India)");
+                } else if upper.contains("42") {
+                    app.map_tiles.manual_crs = Some(crate::map_tiles::CoordSystem::Utm { zone: 42, north: true });
+                    if let Ok(d) = app.session.doc_mut() {
+                        d.header.set("GEO_CRS", cadcraft_doc::HVal::Str("UTM_42N".to_string()));
+                    }
+                    app.session.echo("CRS set to UTM Zone 42N (West Gujarat, West Rajasthan)");
+                } else if upper.contains("84") || upper.contains("DEG") || upper.contains("WGS") {
+                    app.map_tiles.manual_crs = Some(crate::map_tiles::CoordSystem::Wgs84);
+                    if let Ok(d) = app.session.doc_mut() {
+                        d.header.set("GEO_CRS", cadcraft_doc::HVal::Str("WGS84".to_string()));
+                    }
+                    app.session.echo("CRS set to WGS 84 (Latitude / Longitude Degrees)");
+                } else if upper.contains("MERC") || upper.contains("3857") {
+                    app.map_tiles.manual_crs = Some(crate::map_tiles::CoordSystem::WebMercator);
+                    if let Ok(d) = app.session.doc_mut() {
+                        d.header.set("GEO_CRS", cadcraft_doc::HVal::Str("EPSG_3857".to_string()));
+                    }
+                    app.session.echo("CRS set to Web Mercator (EPSG:3857)");
+                } else if upper.contains("AUTO") {
+                    app.map_tiles.manual_crs = None;
+                    if let Ok(d) = app.session.doc_mut() {
+                        d.header.set("GEO_CRS", cadcraft_doc::HVal::Str("AUTO".to_string()));
+                    }
+                    app.session.echo("CRS set to Auto-Detect");
+                } else {
+                    app.session.echo(format!(
+                        "Current CRS: {} (type CRS 43, CRS 44, CRS 45, CRS 42, CRS WGS84, or CRS AUTO)",
+                        app.map_tiles.current_crs.display_name()
+                    ));
+                }
+            } else {
+                app.session.echo(format!(
+                    "Current CRS: {} (type CRS 43, CRS 44, CRS 45, CRS 42, CRS WGS84, or CRS AUTO)",
+                    app.map_tiles.current_crs.display_name()
+                ));
+            }
+            Ok(Value::Null)
+        }
+        "view.twist.cw" | "viewcube.rot.cw" => {
+            app.ui.view_twist = (app.ui.view_twist + 1) % 4;
+            let dir = match app.ui.view_twist {
+                1 => "West Up (90°)",
+                2 => "South Up (180°)",
+                3 => "East Up (270°)",
+                _ => "North Up (0°)",
+            };
+            app.session.echo(format!("View rotated 90° CW: {dir}"));
+            Ok(Value::Null)
+        }
+        "view.twist.ccw" | "viewcube.rot.ccw" => {
+            app.ui.view_twist = (app.ui.view_twist + 3) % 4;
+            let dir = match app.ui.view_twist {
+                1 => "West Up (90°)",
+                2 => "South Up (180°)",
+                3 => "East Up (270°)",
+                _ => "North Up (0°)",
+            };
+            app.session.echo(format!("View rotated 90° CCW: {dir}"));
+            Ok(Value::Null)
+        }
+        "view.orient.north" | "plan" => {
+            app.ui.view_twist = 0;
+            app.ui.view_name = "Top".to_string();
+            app.session.echo("View orientation: North Up (0°)");
+            Ok(Value::Null)
+        }
+        "view.orient.west" => {
+            app.ui.view_twist = 1;
+            app.session.echo("View orientation: West Up (90°)");
+            Ok(Value::Null)
+        }
+        "view.orient.south" => {
+            app.ui.view_twist = 2;
+            app.session.echo("View orientation: South Up (180°)");
+            Ok(Value::Null)
+        }
+        "view.orient.east" => {
+            app.ui.view_twist = 3;
+            app.session.echo("View orientation: East Up (270°)");
+            Ok(Value::Null)
+        }
+        "view.top" => {
+            app.ui.view_name = "Top".to_string();
+            app.session.echo("View: Top (Plan)");
+            let _ = app.session.zoom_extents();
+            Ok(Value::Null)
+        }
+        "view.front" => {
+            app.ui.view_name = "Front".to_string();
+            app.session.echo("View: Front elevation");
+            let _ = app.session.zoom_extents();
+            Ok(Value::Null)
+        }
+        "view.left" => {
+            app.ui.view_name = "Left".to_string();
+            app.session.echo("View: Left elevation");
+            let _ = app.session.zoom_extents();
+            Ok(Value::Null)
+        }
+        "view.right" => {
+            app.ui.view_name = "Right".to_string();
+            app.session.echo("View: Right elevation");
+            let _ = app.session.zoom_extents();
+            Ok(Value::Null)
+        }
+        "view.back" => {
+            app.ui.view_name = "Back".to_string();
+            app.session.echo("View: Back elevation");
+            let _ = app.session.zoom_extents();
+            Ok(Value::Null)
+        }
+        "view.bottom" => {
+            app.ui.view_name = "Bottom".to_string();
+            app.session.echo("View: Bottom");
+            let _ = app.session.zoom_extents();
             Ok(Value::Null)
         }
         "ui.toggle.menubar" => {
@@ -338,11 +675,16 @@ fn run_ui_command_inner(app: &mut CadApp, id: &str, params: &Value) -> Option<Re
         | "ui.dialog.layers"
         | "ui.dialog.blocks"
         | "ui.dialog.dsettings"
+        | "ui.dialog.importpoints"
         | "ui.dialog.about"
         | "ui.dialog.commands"
         | "ui.dialog.qselect"
         | "ui.dialog.parameters" => {
             app.ui.dialog = Some(id.trim_start_matches("ui.dialog.").to_string());
+            Ok(Value::Null)
+        }
+        "importpoints" | "pointimport" | "importcsv" | "csvimport" => {
+            app.ui.dialog = Some("importpoints".to_string());
             Ok(Value::Null)
         }
         "ui.dialog.close" => {
@@ -718,6 +1060,8 @@ mod tests {
                 log.borrow_mut().push(name.to_string());
                 answer.clone()
             })),
+            pick_points: None,
+            ..Services::default()
         };
         (CadApp::new(Session::new(), services), asked)
     }

@@ -30,6 +30,7 @@ pub fn show(app: &mut CadApp, ctx: &egui::Context) {
         "bedit" => crate::bedit::dialog(app, ctx, &mut open),
         "authoring" => crate::bedit::authoring_dialog(app, ctx, &mut open),
         "stylesmanager" => crate::plotstyles::dialog(app, ctx, &mut open),
+        "importpoints" => crate::import_points_dlg::dialog(app, ctx, &mut open),
         o if o == "options" || o.starts_with("options:") => crate::options::dialog(app, ctx, o, &mut open),
         other => crate::managers::dialog(app, ctx, other, &mut open),
     }
@@ -305,38 +306,23 @@ fn units(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) {
 
 fn about(ctx: &egui::Context, open: &mut bool) {
     let t = Tokens::get();
-    let tab_id = egui::Id::new("about_tab");
     egui::Window::new(crate::tl!("About CADCraft"))
         .id(egui::Id::new("About CADCraft"))
         .open(open)
-        .default_size(vec2(640.0, 420.0))
+        .default_size(vec2(520.0, 220.0))
         .collapsible(false)
+        .resizable(false)
         .show(ctx, |ui| {
-            let mut tab = ui.data_mut(|d| d.get_temp::<u8>(tab_id)).unwrap_or(0);
-            ui.horizontal(|ui| {
-                for (i, l) in ["About", "Contributors", "Models"].iter().enumerate() {
-                    if ui.selectable_label(tab == i as u8, crate::i18n::t(l)).clicked() {
-                        tab = i as u8;
-                    }
-                }
-            });
-            ui.data_mut(|d| d.insert_temp(tab_id, tab));
-            ui.separator();
-            match tab {
-                1 => crate::credits::contributors_ui(ui),
-                2 => crate::credits::models_ui(ui),
-                _ => {
-                    ui.heading(crate::tl!("MonarchCAD"));
-                    ui.label(crate::tf!("Version {version}", version = env!("CARGO_PKG_VERSION")));
-                    ui.label(crate::tl!("Computer-aided design and drafting: an open-source, clean-room CAD application written in pure Rust."));
-                    ui.add_space(6.0);
-                    ui.label(RichText::new(crate::tl!("One of the Crafting Apps by the ArtCraft team and community.")).color(t.text_dim));
-                    ui.hyperlink_to("getartcraft.com/apps/cadcraft", "https://getartcraft.com/apps/cadcraft");
-                    ui.hyperlink_to(crate::tl!("Join us on Discord"), "https://discord.gg/artcraft");
-                    ui.add_space(6.0);
-                    ui.label(RichText::new(crate::tl!("MIT OR Apache-2.0. Not affiliated with Autodesk, Inc.")).small().color(t.text_faint));
-                }
-            }
+            ui.heading("MonarchCAD");
+            ui.add_space(4.0);
+            ui.label(RichText::new(format!("Version {}", env!("CARGO_PKG_VERSION"))).strong().color(egui::Color32::from_rgb(52, 211, 153)));
+            ui.add_space(4.0);
+            ui.label(crate::tl!("Computer-aided design and drafting: an open-source, clean-room CAD application written in pure Rust."));
+            ui.add_space(8.0);
+            ui.label(RichText::new("MonarchCAD Drafting & Design System.").color(t.text_dim));
+            ui.hyperlink_to("github.com/UtkarshPingale/MonarchCAD", "https://github.com/UtkarshPingale/MonarchCAD");
+            ui.add_space(8.0);
+            ui.label(RichText::new("Copyright (c) 2026 MonarchCAD. All rights reserved.").small().color(t.text_faint));
         });
 }
 

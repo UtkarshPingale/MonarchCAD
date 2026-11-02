@@ -36,17 +36,17 @@ impl NativeMenu {
         let language = app.language();
         let mut submenus = Vec::new();
         let mut counter = 0usize;
-        let app_menu = Submenu::new("CADCraft", true);
-        let about = MenuItem::with_id("cc-about", i18n::tr(language, "About CADCraft"), true, None);
+        let app_menu = Submenu::new("MonarchCAD", true);
+        let about = MenuItem::with_id("cc-about", i18n::tr(language, "About MonarchCAD"), true, None);
         let discord = MenuItem::with_id("cc-discord", i18n::tr(language, "Join the ArtCraft Discord…"), true, None);
         let predefined = vec![
             ("Services", PredefinedMenuItem::services(Some(i18n::tr(language, "Services")))),
-            ("Hide CADCraft", PredefinedMenuItem::hide(Some(i18n::tr(language, "Hide CADCraft")))),
+            ("Hide MonarchCAD", PredefinedMenuItem::hide(Some(i18n::tr(language, "Hide MonarchCAD")))),
             ("Hide Others", PredefinedMenuItem::hide_others(Some(i18n::tr(language, "Hide Others")))),
             ("Show All", PredefinedMenuItem::show_all(Some(i18n::tr(language, "Show All")))),
-            ("Quit CADCraft", PredefinedMenuItem::quit(Some(i18n::tr(language, "Quit CADCraft")))),
+            ("Quit MonarchCAD", PredefinedMenuItem::quit(Some(i18n::tr(language, "Quit MonarchCAD")))),
         ];
-        // The Mac place for preferences: CADCraft ▸ Settings… (⌘,) opens the Options dialog.
+        // The Mac place for preferences: MonarchCAD ▸ Settings… (⌘,) opens the Options dialog.
         let settings = MenuItem::with_id("cc-settings", i18n::tr(language, "Settings..."), true, accel("Cmd+Comma"));
         let _ = app_menu.append_items(&[&about, &discord, &PredefinedMenuItem::separator(), &settings, &PredefinedMenuItem::separator()]);
         for (label, item) in &predefined {
@@ -55,7 +55,7 @@ impl NativeMenu {
                 let _ = app_menu.append(&PredefinedMenuItem::separator());
             }
         }
-        items.insert("cc-about".into(), ("ui.dialog.about".into(), "About CADCraft".into(), about));
+        items.insert("cc-about".into(), ("ui.dialog.about".into(), "About MonarchCAD".into(), about));
         items.insert("cc-discord".into(), ("ui.discord".into(), "Join the ArtCraft Discord…".into(), discord));
         items.insert("cc-settings".into(), ("options".into(), "Settings...".into(), settings));
         let _ = menu.append(&app_menu);

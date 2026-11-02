@@ -5,7 +5,11 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 publish = false
-default-run = "cadcraft"
+default-run = "monarchcad"
+
+[[bin]]
+name = "monarchcad"
+path = "src/main.rs"
 
 [lints]
 workspace = true

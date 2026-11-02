@@ -68,10 +68,56 @@ pub fn title_and_toolbar(app: &mut CadApp, ui: &mut egui::Ui) {
     let tb_h = if app.ui.show_toolbar { 34.0 } else { 0.0 };
     egui::Panel::top("cc_title_toolbar").exact_size(title_h + tb_h).frame(egui::Frame::NONE.fill(t.chrome)).show(ui, |ui| {
         let r = ui.max_rect();
+        let full_file_name = match app.session.state() {
+            Ok(st) if !app.ui.start_tab => {
+                let dirty = if st.is_dirty() { "*" } else { "" };
+                match &st.path {
+                    Some(p) => {
+                        #[cfg(not(target_arch = "wasm32"))]
+                        let full = std::fs::canonicalize(p)
+                            .map(|pb| {
+                                let s = pb.to_string_lossy().to_string();
+                                s.trim_start_matches(r"\\?\").to_string()
+                            })
+                            .unwrap_or_else(|_| p.clone());
+                        #[cfg(target_arch = "wasm32")]
+                        let full = p.clone();
+                        format!("{full}{dirty}")
+                    }
+                    None => {
+                        let ext = if st.title.contains('.') { "" } else { ".dwg" };
+                        format!("{}{ext}{dirty}", st.title)
+                    }
+                }
+            }
+            _ => {
+                if app.ui.start_tab {
+                    crate::tl!("Start").to_string()
+                } else {
+                    String::new()
+                }
+            }
+        };
+
+        if !full_file_name.is_empty() {
+            let win_w = r.width();
+            let max_chars = ((win_w - 200.0) / 6.2).max(20.0) as usize;
+            let display_name =
+                if full_file_name.chars().count() > max_chars { middle_elide_chars(&full_file_name, max_chars) } else { full_file_name.clone() };
+            let win_title = format!("MonarchCAD - [{display_name}]");
+
+            let last_title = ui.data_mut(|d| d.get_temp::<String>(ui.id().with("last_win_title")));
+            if last_title.as_deref() != Some(&win_title) {
+                ui.data_mut(|d| d.insert_temp(ui.id().with("last_win_title"), win_title.clone()));
+                ui.ctx().send_viewport_cmd(egui::ViewportCommand::Title(win_title));
+            }
+        }
+
         if title_h > 0.0 {
-            let title = match app.session.state() {
-                Ok(st) if !app.ui.start_tab => format!("CADCraft      {}{}", st.title, if st.title.contains('.') { "" } else { ".dwg" }),
-                _ => format!("CADCraft      {}", crate::tl!("Start")),
+            let title = if full_file_name.is_empty() {
+                format!("MonarchCAD      {}", crate::tl!("Start"))
+            } else {
+                format!("MonarchCAD      {full_file_name}")
             };
             // Centred on the traffic lights' centre line (the row's middle): with the system font
             // the capitals' middle is the text box's middle, so no optical nudge.
@@ -263,6 +309,19 @@ pub fn file_tabs(app: &mut CadApp, ui: &mut egui::Ui) {
     });
 }
 
+/// Middle-elide characters for window title text.
+fn middle_elide_chars(text: &str, max_chars: usize) -> String {
+    let chars: Vec<char> = text.chars().collect();
+    if chars.len() <= max_chars || max_chars < 12 {
+        return text.to_string();
+    }
+    let left_len = (max_chars / 3).max(6);
+    let right_len = max_chars.saturating_sub(left_len + 3);
+    let left: String = chars[..left_len].iter().collect();
+    let right: String = chars[chars.len().saturating_sub(right_len)..].iter().collect();
+    format!("{left}...{right}")
+}
+
 /// `text` laid out on one line no wider than `max_width`, ending in "…" when it had to be cut;
 /// and whether it was.
 fn elided(p: &egui::Painter, text: &str, font: egui::FontId, color: egui::Color32, max_width: f32) -> (std::sync::Arc<egui::Galley>, bool) {
@@ -331,6 +390,7 @@ pub fn status_bar(app: &mut CadApp, ui: &mut egui::Ui) {
         use cadcraft_engine::snap::mode;
         let toggles: Vec<(Icon, bool, &str, &str)> = vec![
             (Icon::Grid, s.gridmode, "grid", "Grid (F7)"),
+            (Icon::Map, app.ui.show_map, "geomap.toggle", "OpenStreetMap / Georeferenced Map (GEOMAP)"),
             (Icon::Snap, s.snapmode, "snap", "Snap Mode (F9)"),
             (Icon::Ortho, s.orthomode, "ortho", "Ortho Mode (F8)"),
             (Icon::Polar, s.polarmode, "polar", "Polar Tracking (F10)"),
@@ -357,8 +417,33 @@ pub fn status_bar(app: &mut CadApp, ui: &mut egui::Ui) {
                 cadcraft_engine::units::format_distance(0.0, lu, lp)
             )
         });
-        // MODEL / PAPER (layouts only): toggles MSPACE and PSPACE like AutoCAD's status button.
+        let show_crs_pill = r.width() >= 1050.0;
         let mut coord_right = rx - 8.0;
+        if show_crs_pill {
+            // Interactive CRS (Coordinate Reference System) indicator and switcher button
+            let crs_label = format!("🌐 {}", app.map_tiles.current_crs.short_name());
+            let crs_w = 84.0;
+            let crs_rect = Rect::from_min_size(pos2(rx - crs_w - 6.0, r.center().y - 10.0), vec2(crs_w, 20.0));
+            let crs_resp = ui.interact(crs_rect, ui.id().with("status_crs_pill"), Sense::click());
+            if crs_resp.hovered() {
+                p.rect_filled(crs_rect, 3.0, t.control_hover);
+            } else {
+                p.rect_filled(crs_rect, 3.0, t.chrome_dark);
+            }
+            p.rect_stroke(crs_rect, 3.0, Stroke::new(1.0, t.border), egui::StrokeKind::Inside);
+            p.text(crs_rect.center(), egui::Align2::CENTER_CENTER, &crs_label, crate::theme::small(), t.text);
+            icons::describe_control(
+                ui,
+                &crs_resp,
+                &format!("Coordinate Reference System: {}", app.map_tiles.current_crs.display_name()),
+                None,
+                false,
+            );
+            if crs_resp.on_hover_text(format!("CRS: {} (Click to cycle, or type CRS <zone>)", app.map_tiles.current_crs.display_name())).clicked() {
+                crate::menus::run_transparent(app, "crs.cycle");
+            }
+            coord_right = crs_rect.left() - 8.0;
+        }
         // The annotation scale list (model space).
         coord_right = annoscale::status(app, ui, coord_right, r.center().y);
         if matches!(app.session.layout_space(), cadcraft_doc::Space::Paper(_)) {
@@ -526,7 +611,13 @@ pub fn start_page(app: &mut CadApp, ui: &mut egui::Ui) {
     let left = Rect::from_min_size(r.min, vec2(300.0, r.height()));
     p.rect_filled(left, 0.0, t.chrome_dark);
     p.rect_filled(Rect::from_min_max(pos2(left.right(), r.top()), r.max), 0.0, t.chrome);
-    p.text(pos2(left.left() + 34.0, left.top() + 70.0), egui::Align2::LEFT_CENTER, crate::tl!("MonarchCAD"), egui::FontId::proportional(28.0), t.text);
+    p.text(
+        pos2(left.left() + 34.0, left.top() + 70.0),
+        egui::Align2::LEFT_CENTER,
+        crate::tl!("MonarchCAD"),
+        egui::FontId::proportional(28.0),
+        t.text,
+    );
     p.text(
         pos2(left.left() + 34.0, left.top() + 98.0),
         egui::Align2::LEFT_CENTER,

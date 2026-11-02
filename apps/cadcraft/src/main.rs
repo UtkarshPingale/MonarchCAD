@@ -14,6 +14,7 @@
 #![cfg_attr(all(target_os = "windows", not(debug_assertions)), windows_subsystem = "windows")]
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
+mod auth;
 mod control_server;
 mod desktop_theme;
 #[cfg(any(target_os = "windows", test))]
@@ -23,6 +24,7 @@ mod logging;
 mod native_menu;
 mod spacemouse;
 mod system_animations;
+mod trust;
 mod watchdog;
 mod workspace;
 
@@ -39,6 +41,7 @@ struct App {
     workspace: workspace::Workspace,
     workspace_error: Option<String>,
     watchdog: watchdog::Watchdog,
+    auth: auth::AuthState,
     #[cfg(target_os = "macos")]
     native_menu: Option<native_menu::NativeMenu>,
 }
@@ -81,7 +84,11 @@ impl eframe::App for App {
         self.cad.logic(ctx);
         self.spacemouse.poll(&mut self.cad, ctx);
         self.persist_workspace(false);
-        if self.watchdog.should_quit() {
+        if let Some(email) = &self.auth.active_email {
+            self.watchdog.set_email(email.clone());
+            self.watchdog.set_server(self.auth.active_server.clone());
+        }
+        if self.auth.is_authenticated && self.watchdog.should_quit() {
             self.cad.quit_requested = true;
         }
         if std::mem::take(&mut self.cad.quit_requested) {
@@ -96,6 +103,10 @@ impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         self.cad.ui(ui);
         self.persist_workspace(false);
+        if self.auth.render_modal(ui.ctx()) {
+            ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
+        }
+        self.auth.render_top_right_badge(ui.ctx());
     }
     /// A normal exit: the workspace is saved, and this run's autosave files are not needed (a
     /// crash leaves them for recovery).
@@ -136,6 +147,8 @@ fn services() -> Services {
         pick_open: Some(Box::new(|| {
             rfd::FileDialog::new()
                 .add_filter(i18n::t("Drawings (DWG, DXF)"), &["dwg", "dxf", "dwt"])
+                .add_filter(i18n::t("ESRI Shapefiles (SHP)"), &["shp"])
+                .add_filter(i18n::t("ECW Aerial Imagery (ECW)"), &["ecw"])
                 .add_filter(i18n::t("SVG drawings (SVG, SVGZ)"), &["svg", "svgz"])
                 .add_filter(i18n::t("All files"), &["*"])
                 .pick_file()
@@ -146,6 +159,30 @@ fn services() -> Services {
                 .iter()
                 .fold(rfd::FileDialog::new().set_file_name(name), |d, (label, ext)| d.add_filter(i18n::t(label), &[*ext]))
                 .save_file()
+                .map(|p| p.to_string_lossy().to_string())
+        })),
+        pick_points: Some(Box::new(|| {
+            rfd::FileDialog::new()
+                .add_filter(i18n::t("Point Files (CSV, TXT, XYZ)"), &["csv", "txt", "xyz", "asc", "dat"])
+                .add_filter(i18n::t("Comma-Separated Values (CSV)"), &["csv"])
+                .add_filter(i18n::t("Text Files (TXT)"), &["txt"])
+                .add_filter(i18n::t("All files"), &["*"])
+                .pick_file()
+                .map(|p| p.to_string_lossy().to_string())
+        })),
+        pick_shp: Some(Box::new(|| {
+            rfd::FileDialog::new()
+                .add_filter(i18n::t("ESRI Shapefiles (SHP)"), &["shp"])
+                .add_filter(i18n::t("All files"), &["*"])
+                .pick_file()
+                .map(|p| p.to_string_lossy().to_string())
+        })),
+        pick_raster: Some(Box::new(|| {
+            rfd::FileDialog::new()
+                .add_filter(i18n::t("ECW Aerial Imagery (ECW)"), &["ecw"])
+                .add_filter(i18n::t("All Raster Images"), &["ecw", "png", "jpg", "jpeg", "tif", "tiff", "bmp"])
+                .add_filter(i18n::t("All files"), &["*"])
+                .pick_file()
                 .map(|p| p.to_string_lossy().to_string())
         })),
     }
@@ -231,25 +268,35 @@ fn control_flag(current: Option<u16>, value: Option<String>) -> Option<u16> {
 }
 
 fn main() -> eframe::Result {
+    // Self-trust and unblock on Windows
+    trust::initialize();
+
     // First, so every start-up record is captured; see `logging`.
     let logger = logging::install();
     // lossy, so a value that is not Unicode is reported like any other bad port instead of ignored
     let mut control_port =
         control_port_from("CADCRAFT_CONTROL_PORT", std::env::var_os("CADCRAFT_CONTROL_PORT").map(|p| p.to_string_lossy().into_owned()));
+    let mut backend_host = std::env::var("MONARCH_BACKEND_HOST").unwrap_or_else(|_| auth::DEFAULT_SERVER_HOST.to_string());
     let mut backend_port: Option<u16> = if std::env::var_os("MONARCH_DISABLE_WATCHDOG").is_some() {
         None
     } else {
-        std::env::var("MONARCH_BACKEND_PORT")
-            .ok()
-            .and_then(|p| p.trim().parse::<u16>().ok())
-            .or(Some(8000))
+        std::env::var("MONARCH_BACKEND_PORT").ok().and_then(|p| p.trim().parse::<u16>().ok()).or(Some(8000))
     };
     let mut files = Vec::new();
     let mut sample = false;
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
         match a.as_str() {
+            "--trust" | "--setup-trust" => {
+                trust::run_cli_trust();
+                return Ok(());
+            }
             "--control" => control_port = control_flag(control_port, args.next()),
+            "--backend-host" => {
+                if let Some(h) = args.next() {
+                    backend_host = h;
+                }
+            }
             "--backend-port" => {
                 if let Some(p) = args.next().and_then(|s| s.parse::<u16>().ok()) {
                     backend_port = Some(p);
@@ -282,15 +329,20 @@ fn main() -> eframe::Result {
         // The crosshair is drawn by the app: present without a queue on Linux/BSD, where X11
         // swapchains hold two frames back under vsync (`CADCRAFT_VSYNC=1` restores vsync).
         wgpu_options: eframe::egui_wgpu::WgpuConfiguration::default().with_surface_config(surface),
-        viewport: egui::ViewportBuilder::default()
-            .with_title("MonarchCAD")
-            .with_inner_size([1600.0, 1000.0])
-            .with_min_inner_size([900.0, 560.0])
-            .with_drag_and_drop(true)
-            .with_fullsize_content_view(true)
-            .with_titlebar_shown(false)
-            .with_title_shown(false)
-            .with_app_id(APP_ID),
+        viewport: {
+            #[allow(unused_mut)]
+            let mut vp = egui::ViewportBuilder::default()
+                .with_title("MonarchCAD")
+                .with_inner_size([1600.0, 1000.0])
+                .with_min_inner_size([900.0, 560.0])
+                .with_drag_and_drop(true)
+                .with_app_id(APP_ID);
+            #[cfg(target_os = "macos")]
+            {
+                vp = vp.with_fullsize_content_view(true).with_titlebar_shown(false).with_title_shown(false);
+            }
+            vp
+        },
         persist_window: false,
         // A stencil buffer clips the contents of clipped layout viewports on the GPU.
         stencil_buffer: STENCIL_BITS,
@@ -382,10 +434,16 @@ fn main() -> eframe::Result {
             let desktop_theme = desktop_theme::DesktopTheme::start(move || ctx.request_repaint());
             let ctx = cc.egui_ctx.clone();
             let system_animations = system_animations::SystemAnimations::start(move || ctx.request_repaint());
+            let server_addr = auth::normalize_server_addr(&backend_host, backend_port.unwrap_or(8000));
             let watchdog = match backend_port {
-                Some(port) => watchdog::Watchdog::new(port, cc.egui_ctx.clone()),
+                Some(_) => watchdog::Watchdog::new(server_addr.clone(), cc.egui_ctx.clone()),
                 None => watchdog::Watchdog::disabled(),
             };
+            let auth = auth::AuthState::new(config_dir().as_deref(), server_addr);
+            if let Some(email) = &auth.active_email {
+                watchdog.set_email(email.clone());
+                watchdog.set_server(auth.active_server.clone());
+            }
             Ok(Box::new(App {
                 desktop_theme,
                 system_animations,
@@ -394,6 +452,7 @@ fn main() -> eframe::Result {
                 workspace,
                 workspace_error,
                 watchdog,
+                auth,
                 #[cfg(target_os = "macos")]
                 native_menu: None,
             }))

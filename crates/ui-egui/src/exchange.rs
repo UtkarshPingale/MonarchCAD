@@ -26,7 +26,52 @@ pub fn route(app: &mut CadApp, id: &str) -> Result<Value, String> {
         "import" | "imp" => {
             let Some(pick) = app.services.pick_open.as_ref() else { return no_picker(app, "IMPORT", r#"import {"path": "parts.dxf"}"#) };
             match pick() {
-                Some(path) => app.run("import", json!({ "path": path })),
+                Some(path) => {
+                    let prev_empty = app.session.state().map(|s| s.doc.entity_count() == 0).unwrap_or(false);
+                    let res = app.run("import", json!({ "path": path }));
+                    if res.is_ok() && prev_empty {
+                        let _ = app.run("zoom.extents", json!({}));
+                    }
+                    res
+                }
+                None => Ok(Value::Null),
+            }
+        }
+        "mapimport" | "shpimport" | "shp" | "gisimport" => {
+            let pick_fn = app.services.pick_shp.as_ref().or(app.services.pick_open.as_ref());
+            let Some(pick) = pick_fn else { return no_picker(app, "MAPIMPORT", r#"mapimport {"path": "parcels.shp"}"#) };
+            match pick() {
+                Some(path) => {
+                    let prev_empty = app.session.state().map(|s| s.doc.entity_count() == 0).unwrap_or(false);
+                    let res = app.run("mapimport", json!({ "path": path }));
+                    if res.is_ok() {
+                        let file = std::path::Path::new(&path).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| path.clone());
+                        app.session.echo(format!("Successfully imported Shapefile '{file}' into current drawing."));
+                        if prev_empty {
+                            let _ = app.run("zoom.extents", json!({}));
+                        }
+                    }
+                    res
+                }
+                None => Ok(Value::Null),
+            }
+        }
+        "imageattach" | "image" | "img" | "ecw" | "ecwimport" | "rasterimage" => {
+            let pick_fn = app.services.pick_raster.as_ref().or(app.services.pick_open.as_ref());
+            let Some(pick) = pick_fn else { return no_picker(app, "IMAGEATTACH", r#"imageattach {"path": "ortho.ecw"}"#) };
+            match pick() {
+                Some(path) => {
+                    let prev_empty = app.session.state().map(|s| s.doc.entity_count() == 0).unwrap_or(false);
+                    let res = app.run("imageattach", json!({ "path": path }));
+                    if res.is_ok() {
+                        let file = std::path::Path::new(&path).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| path.clone());
+                        app.session.echo(format!("Successfully inserted raster image '{file}' into current drawing."));
+                        if prev_empty {
+                            let _ = app.run("zoom.extents", json!({}));
+                        }
+                    }
+                    res
+                }
                 None => Ok(Value::Null),
             }
         }
@@ -176,6 +221,8 @@ mod tests {
                 b.borrow_mut().push(name.to_string());
                 None
             })),
+            pick_points: None,
+            ..Services::default()
         };
         (CadApp::new(Session::new(), services), asked)
     }
